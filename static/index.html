@@ -1,0 +1,583 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AEGIS // GIS Disaster Relief Logistics Simulator</title>
+  
+  <!-- Modern Typography (Inter & JetBrains Mono) -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+  
+  <!-- Leaflet CSS for Interactive Mapping -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+  
+  
+  <!-- Custom Vanilla CSS -->
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <!-- Header Bar -->
+  <header class="app-header">
+    <div class="header-left">
+      <div class="logo-badge">
+        <span class="logo-icon">🛡️</span>
+        <div class="logo-text">
+          <h1>AEGIS RELIEF</h1>
+          <span class="subtitle">Autonomous Multimodal GIS Disaster Logistics</span>
+        </div>
+      </div>
+      <div class="status-pill" id="system-status">
+        <span class="status-dot"></span>
+        <span class="status-label">System Online &bull; OSM Ingestion Ready</span>
+      </div>
+    </div>
+    
+    <div class="header-actions">
+      <button class="btn btn-secondary" id="btn-sync-weather" title="Query live weather for the hazard area">
+        <span class="btn-icon">🌤️</span> Fetch Live Weather
+      </button>
+      <button class="btn btn-secondary" id="btn-load-preset" title="Reset to Downtown LA Baseline">
+        <span class="btn-icon">📍</span> Reset DTLA Preset
+      </button>
+      <button class="btn btn-accent" id="btn-population-analysis" title="Analyze population density via OSM building footprints">
+        <span class="btn-icon">🏘️</span> Analyze Population
+      </button>
+      <button class="btn btn-primary" id="btn-run-simulation">
+        <span class="btn-icon">⚡</span> Run Optimization
+      </button>
+    </div>
+  </header>
+
+  <!-- Main Application Body -->
+  <main class="app-layout">
+    <!-- Left Configuration Sidebar -->
+    <aside class="sidebar-panel">
+      
+      <!-- Hazard Zone & n-Sided Polygon Generation Section -->
+      <section class="config-card" id="hazard-config-card">
+        <div class="card-header">
+          <div class="card-title">
+            <span class="icon">⚠️</span>
+            <h3>Hazard Polygon ($n$ sides, $m$ km)</h3>
+          </div>
+          <span class="badge badge-warning" id="hazard-shape-badge">Hexagon (6)</span>
+        </div>
+        <div class="card-body">
+          
+          <!-- Hazard Center Coordinates -->
+          <div class="form-group">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+              <label for="hazard-center-input">Hazard Epicenter (Lat, Lon):</label>
+              <button type="button" class="btn-micro" id="btn-use-map-center" title="Snap to current map center">📍 Map Center</button>
+            </div>
+            <input type="text" id="hazard-center-input" class="form-input" value="34.0522, -118.2437" placeholder="34.0522, -118.2437">
+            <small class="help-text">Epicenter coordinate around which the polygon expands.</small>
+          </div>
+
+          <!-- Dual inputs: n sides and m radius -->
+          <div class="form-row">
+            <div class="form-group half">
+              <label for="hazard-sides-input">Sides ($n$):</label>
+              <input type="number" id="hazard-sides-input" class="form-input" min="3" max="36" value="6" step="1">
+            </div>
+            <div class="form-group half">
+              <label for="hazard-radius-num">Radius $m$ (km):</label>
+              <input type="number" id="hazard-radius-num" class="form-input" min="0.1" max="25.0" value="1.50" step="0.1">
+            </div>
+          </div>
+
+          <!-- Quick shape preset buttons -->
+          <div class="form-group" style="margin-bottom: 10px;">
+            <div style="font-size: 11px; margin-bottom: 5px; color: var(--text-muted);">Quick Shape Presets ($n$ sides):</div>
+            <div class="shape-preset-chips" style="display: flex; gap: 4px; flex-wrap: wrap;">
+              <button type="button" class="chip-preset" data-sides="3">🔺 Triangle (3)</button>
+              <button type="button" class="chip-preset" data-sides="4">◼️ Square (4)</button>
+              <button type="button" class="chip-preset" data-sides="5">⬟ Pentagon (5)</button>
+              <button type="button" class="chip-preset active-chip" data-sides="6">⬡ Hexagon (6)</button>
+              <button type="button" class="chip-preset" data-sides="8">🛑 Octagon (8)</button>
+              <button type="button" class="chip-preset" data-sides="24">⭕ Circle (24)</button>
+              <button type="button" class="chip-preset" id="chip-preset-adjusted" style="border-color: rgba(168, 85, 247, 0.5); color: #c084fc; font-weight: 600;">🟣 Adjusted (Pop)</button>
+            </div>
+          </div>
+
+          <!-- Radius Slider -->
+          <div class="form-group">
+            <div class="slider-header">
+              <label for="hazard-radius-slider">Radius Slider ($m$ kilometers):</label>
+              <span class="slider-value" id="radius-val-display">1.50 km</span>
+            </div>
+            <input type="range" id="hazard-radius-slider" min="0.2" max="10.0" step="0.1" value="1.5" class="range-slider">
+          </div>
+
+          <!-- Generated Polygon Vertices -->
+          <div class="form-group">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+              <label for="hazard-coords-input">Generated Polygon Vertices ($n$ points):</label>
+              <span style="font-size: 10px; color: var(--accent-cyan);" id="vertex-count-badge">6 vertices</span>
+            </div>
+            <textarea id="hazard-coords-input" rows="4" class="code-textarea" placeholder="Calculated polygon coordinates..."></textarea>
+            <small class="help-text">Auto-generated $n$-sided polygon at $m$ km radius. Directly editable if needed.</small>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group half">
+              <label for="repair-factor">Road Damage Severity:</label>
+              <select id="repair-factor" class="form-select">
+                <option value="0.2">Minor Damage (2.4x delay)</option>
+                <option value="0.5" selected>Moderate Damage (6.0x delay)</option>
+                <option value="1.0">Severe Rupture (12.0x delay)</option>
+              </select>
+            </div>
+            <div class="form-group half">
+              <label>Map Click Mode:</label>
+              <select id="map-click-mode" class="form-select">
+                <option value="hazard-center" selected>Set Hazard Center</option>
+                <option value="depot">Add Supply Depot</option>
+                <option value="zone">Add Impact Zone</option>
+                <option value="none">Inspect / Navigate</option>
+              </select>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Population Density Analysis Section -->
+      <section class="config-card" id="population-config-card">
+        <div class="card-header">
+          <div class="card-title">
+            <span class="icon">🏘️</span>
+            <h3>Population & Impact Analysis</h3>
+          </div>
+          <span class="badge badge-info" id="pop-analysis-badge">Not Run</span>
+        </div>
+        <div class="card-body">
+          <div class="pop-analysis-summary" id="pop-analysis-summary">
+            <p class="help-text" style="margin: 0;">Queries OSM building footprints to estimate population density within the hazard polygon and a 1.5× outer buffer ring. Detects high-density clusters as potential impact targets and builds an adaptive polygon fitted to actual building distribution.</p>
+          </div>
+
+          <div class="pop-stats-grid" id="pop-stats-grid" style="display: none;">
+            <div class="pop-stat-card pop-inner">
+              <div class="pop-stat-label">🔴 Hazard Core Zone</div>
+              <div class="pop-stat-value" id="pop-inner-count">—</div>
+              <div class="pop-stat-sub" id="pop-inner-detail">buildings / est. population</div>
+            </div>
+            <div class="pop-stat-card pop-outer">
+              <div class="pop-stat-label">🟠 Impact Buffer Ring (1.5×)</div>
+              <div class="pop-stat-value" id="pop-outer-count">—</div>
+              <div class="pop-stat-sub" id="pop-outer-detail">buildings / est. population</div>
+            </div>
+          </div>
+
+          <div class="form-group" style="margin-top: 10px;">
+            <div class="form-row" style="gap: 6px;">
+              <button type="button" class="btn btn-accent" id="btn-run-pop-analysis" style="flex: 1; justify-content: center;">
+                <span class="btn-icon">🏘️</span> Run Population Analysis
+              </button>
+              <button type="button" class="btn btn-secondary" id="btn-apply-adaptive" style="flex: 1; justify-content: center;" disabled>
+                <span class="btn-icon">🔄</span> Apply Adjusted Polygon
+              </button>
+            </div>
+          </div>
+
+          <div id="pop-impact-targets-container" style="display: none; margin-top: 10px;">
+            <label style="font-size: 11px; color: var(--text-muted); margin-bottom: 4px; display: block;">Detected Impact Targets (outer ring):</label>
+            <div class="impact-targets-list" id="impact-targets-list"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- GDACS Live Emergency Intelligence Section (UN OCHA / EC) -->
+      <section class="config-card" id="gdacs-config-card">
+        <div class="card-header">
+          <div class="card-title">
+            <span class="icon">🚨</span>
+            <h3>GDACS Emergency Intelligence</h3>
+          </div>
+          <span class="badge badge-info" id="gdacs-status-badge">UN/EC Live</span>
+        </div>
+        <div class="card-body">
+          <div class="gdacs-summary-text">
+            <p class="help-text" style="margin: 0;">Queries the Global Disaster Alert & Coordination System (GDACS) for live earthquakes, cyclones, floods, volcanoes, and wildfires intersecting your hazard perimeter.</p>
+          </div>
+
+          <div class="pop-stats-grid" id="gdacs-stats-grid" style="display: none; margin-top: 10px;">
+            <div class="pop-stat-card pop-inner">
+              <div class="pop-stat-label">🔴 Inside Hazard Polygon</div>
+              <div class="pop-stat-value" id="gdacs-inside-count">0</div>
+              <div class="pop-stat-sub">Active Alerts</div>
+            </div>
+            <div class="pop-stat-card pop-outer">
+              <div class="pop-stat-label">🟠 Regional Buffer Zone</div>
+              <div class="pop-stat-value" id="gdacs-nearby-count">0</div>
+              <div class="pop-stat-sub">Nearby Emergencies</div>
+            </div>
+          </div>
+
+          <div class="form-group" style="margin-top: 10px;">
+            <button type="button" class="btn btn-secondary" id="btn-query-gdacs" style="width: 100%; justify-content: center;">
+              <span class="btn-icon">🚨</span> Query GDACS Live Alerts
+            </button>
+          </div>
+
+          <div id="gdacs-alerts-container" style="display: none; margin-top: 10px;">
+            <label style="font-size: 11px; color: var(--text-muted); margin-bottom: 4px; display: block;">Live GDACS Emergency Events:</label>
+            <div class="impact-targets-list" id="gdacs-alerts-list"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Map & Basemap Tile Services (CartoDB, Mapbox, Stadia, Custom) -->
+      <section class="config-card" id="map-service-card">
+        <div class="card-header">
+          <div class="card-title">
+            <span class="icon">🗺️</span>
+            <h3>Map & Basemap Services</h3>
+          </div>
+          <span class="badge badge-success" id="map-provider-badge">CartoDB (Free)</span>
+        </div>
+        <div class="card-body">
+          <div class="form-group">
+            <label for="map-provider-select">Basemap Provider & Style:</label>
+            <select id="map-provider-select" class="form-select">
+              <optgroup label="Free (No Key Required)">
+                <option value="carto-dark" selected>CartoDB Dark Matter (Default)</option>
+                <option value="carto-light">CartoDB Positron (Light Mode)</option>
+                <option value="carto-voyager">CartoDB Voyager (Street)</option>
+                <option value="osm-standard">OpenStreetMap Standard</option>
+              </optgroup>
+              <optgroup label="Mapbox (Requires API Token)">
+                <option value="mapbox-dark">Mapbox Navigation Dark</option>
+                <option value="mapbox-streets">Mapbox Streets v12</option>
+                <option value="mapbox-satellite">Mapbox Satellite Hybrid</option>
+              </optgroup>
+              <optgroup label="Stadia Maps (Requires API Key)">
+                <option value="stadia-dark">Stadia Alidade Smooth Dark</option>
+                <option value="stadia-toner">Stadia Stamen Toner Dark</option>
+              </optgroup>
+              <optgroup label="Custom Provider">
+                <option value="custom">Custom XYZ Tile URL Template</option>
+              </optgroup>
+            </select>
+          </div>
+
+          <div class="form-group" id="map-api-key-group">
+            <label for="map-api-key">Map API Key / Access Token <span class="muted-note" id="map-api-key-note">(Optional for CartoDB)</span>:</label>
+            <input type="password" id="map-api-key" class="form-input" placeholder="e.g. pk.eyJ1... for Mapbox, or Stadia Key">
+          </div>
+
+          <div class="form-group" id="custom-tile-url-group" style="display: none;">
+            <label for="custom-tile-url">Custom Tile URL (XYZ template):</label>
+            <input type="text" id="custom-tile-url" class="form-input" placeholder="https://example.com/tiles/{z}/{x}/{y}.png?access_token={key}">
+            <small class="help-text">Use {z}, {x}, {y}, and {key} as placeholders.</small>
+          </div>
+
+          <div class="form-row" style="margin-top: 10px; margin-bottom: 6px;">
+            <button type="button" class="btn btn-secondary" id="btn-apply-map-tiles" style="width: 100%; justify-content: center;">
+              <span class="btn-icon">🗺️</span> Switch Basemap
+            </button>
+          </div>
+
+          <small class="help-text" id="map-provider-status-desc">CartoDB and OSM tiles are free. Mapbox and Stadia require your personal API key or access token.</small>
+        </div>
+      </section>
+
+      <!-- Live Weather Conditions (OWM & Open-Meteo) -->
+      <section class="config-card">
+        <div class="card-header">
+          <div class="card-title">
+            <span class="icon">🌧️</span>
+            <h3>Atmospheric Conditions (OWM / Open-Meteo)</h3>
+          </div>
+          <span class="badge badge-info" id="weather-source-badge">Live API</span>
+        </div>
+        <div class="card-body">
+          <div class="form-group">
+            <label for="owm-api-key">OpenWeatherMap API Key <span class="muted-note">(Optional)</span>:</label>
+            <input type="password" id="owm-api-key" class="form-input" placeholder="Enter key (auto-falls back to Open-Meteo)">
+          </div>
+
+          <div class="weather-metrics-grid">
+            <div class="weather-chip">
+              <span class="chip-label">Precipitation</span>
+              <div class="chip-input-group">
+                <input type="number" id="weather-precip" class="chip-num-input" value="6.0" step="0.5" min="0">
+                <span class="unit">mm/h</span>
+              </div>
+            </div>
+            <div class="weather-chip">
+              <span class="chip-label">Sustained Wind</span>
+              <div class="chip-input-group">
+                <input type="number" id="weather-wind" class="chip-num-input" value="22.0" step="1" min="0">
+                <span class="unit">kts</span>
+              </div>
+            </div>
+            <div class="weather-chip">
+              <span class="chip-label">Temperature</span>
+              <div class="chip-input-group">
+                <input type="number" id="weather-temp" class="chip-num-input" value="19.0" step="0.5" readonly>
+                <span class="unit">°C</span>
+              </div>
+            </div>
+          </div>
+          <small class="help-text" id="weather-status-desc">Rain directly causes road friction delays; wind &gt; 15 kts imposes drone speed penalties.</small>
+        </div>
+      </section>
+
+      <!-- Depots & Supply Setup -->
+      <section class="config-card">
+        <div class="card-header">
+          <div class="card-title">
+            <span class="icon">🏢</span>
+            <h3>Supply Depots</h3>
+          </div>
+          <button class="btn-micro" id="btn-add-depot">+ Add Depot</button>
+        </div>
+        <div class="card-body">
+          <div id="depots-list" class="dynamic-list">
+            <!-- Rendered dynamically -->
+          </div>
+        </div>
+      </section>
+
+      <!-- Impact Zones & Demand Setup -->
+      <section class="config-card">
+        <div class="card-header">
+          <div class="card-title">
+            <span class="icon">🎯</span>
+            <h3>Disaster Impact Zones</h3>
+          </div>
+          <button class="btn-micro" id="btn-add-zone">+ Add Zone</button>
+        </div>
+        <div class="card-body">
+          <div id="zones-list" class="dynamic-list">
+            <!-- Rendered dynamically -->
+          </div>
+        </div>
+      </section>
+
+      <!-- Fleet Specifications & Financial Parameter Sheet -->
+      <section class="config-card collapsible">
+        <div class="card-header" id="fleet-params-toggle">
+          <div class="card-title">
+            <span class="icon">⚙️</span>
+            <h3>Fleet Parameters & Unit Pricing</h3>
+          </div>
+          <span class="toggle-icon">▼</span>
+        </div>
+        <div class="card-body collapsed" id="fleet-params-body">
+          <div class="params-grid">
+            <div class="form-group">
+              <label>Truck Payload (kg):</label>
+              <input type="number" id="param-truck-payload" class="form-input" value="5000">
+            </div>
+            <div class="form-group">
+              <label>Drone Payload (kg):</label>
+              <input type="number" id="param-drone-payload" class="form-input" value="30">
+            </div>
+            <div class="form-group">
+              <label>Diesel Price ($/gal):</label>
+              <input type="number" id="param-diesel-price" class="form-input" value="6.00" step="0.1">
+            </div>
+            <div class="form-group">
+              <label>Fuel Economy (km/gal):</label>
+              <input type="number" id="param-km-gallon" class="form-input" value="6.2" step="0.1">
+            </div>
+            <div class="form-group">
+              <label>Drone Battery ($/cycle):</label>
+              <input type="number" id="param-battery-cost" class="form-input" value="5.87" step="0.01">
+            </div>
+            <div class="form-group">
+              <label>Truck Clear Wear ($/km):</label>
+              <input type="number" id="param-truck-clear-wear" class="form-input" value="0.45" step="0.05">
+            </div>
+            <div class="form-group">
+              <label>Hazard Wear ($/km):</label>
+              <input type="number" id="param-truck-hazard-wear" class="form-input" value="0.75" step="0.05">
+            </div>
+            <div class="form-group">
+              <label>Shortage Penalty ($/kg):</label>
+              <input type="number" id="param-shortage-penalty" class="form-input" value="50.0" step="5">
+            </div>
+          </div>
+        </div>
+      </section>
+
+    </aside>
+
+    <!-- Center/Right Visualization & Ledger Panel -->
+    <section class="main-content">
+      
+      <!-- Top HUD KPI Summary Cards -->
+      <div class="kpi-grid">
+        <div class="kpi-card highlight-glow">
+          <div class="kpi-title">TOTAL MISSION COST</div>
+          <div class="kpi-value" id="kpi-total-cost">$0.00</div>
+          <div class="kpi-meta" id="kpi-solver-status">Awaiting Execution</div>
+        </div>
+
+        <div class="kpi-card">
+          <div class="kpi-title">DEMAND FULFILLMENT</div>
+          <div class="kpi-value" id="kpi-delivered">0 / 0 kg</div>
+          <div class="kpi-meta" id="kpi-fill-rate">100% Satisfied</div>
+        </div>
+
+        <div class="kpi-card">
+          <div class="kpi-title">TRUCK SORTIES</div>
+          <div class="kpi-value" id="kpi-truck-sorties">0 sorties</div>
+          <div class="kpi-meta" id="kpi-truck-km">0.0 km total transit</div>
+        </div>
+
+        <div class="kpi-card">
+          <div class="kpi-title">DRONE AIR SALLIES</div>
+          <div class="kpi-value" id="kpi-drone-sorties">0 sorties</div>
+          <div class="kpi-meta" id="kpi-drone-km">0.0 km aerial vector</div>
+        </div>
+
+        <div class="kpi-card">
+          <div class="kpi-title">HAZARD PERIMETER</div>
+          <div class="kpi-value" id="kpi-hazard-km">0.0 km</div>
+          <div class="kpi-meta" id="kpi-hazard-exposure">Damage Bypassed</div>
+        </div>
+      </div>
+
+      <!-- Interactive GIS Leaflet Map Container -->
+      <div class="map-wrapper">
+        <div id="gis-map"></div>
+
+        <!-- Floating Map Legend & Controls -->
+        <div class="map-overlay-legend">
+          <div class="legend-title">ACTIVE MAP LAYERS</div>
+          <div class="legend-item"><span class="legend-swatch hazard-swatch"></span> Hazard Buffer ($n\text{ km}$)</div>
+          <div class="legend-item"><span class="legend-swatch truck-swatch"></span> Truck Route (OSM Grid)</div>
+          <div class="legend-item"><span class="legend-swatch drone-swatch"></span> Drone Air Vector</div>
+          <div class="legend-item"><span class="legend-swatch depot-swatch"></span> Supply Depot (Warehouse)</div>
+          <div class="legend-item"><span class="legend-swatch zone-swatch"></span> Impact Target (Demand)</div>
+        </div>
+
+        <!-- Interactive Map Action Banner -->
+        <div class="map-click-banner" id="map-click-banner" style="display: none;">
+          <span class="click-banner-icon">🎯</span>
+          <span id="click-banner-text">Click on the map to place point</span>
+          <button class="btn-micro" id="btn-cancel-click-mode">Exit</button>
+        </div>
+      </div>
+
+      <!-- Bottom Results: Operational Freight Ledger & Cost Breakdown -->
+      <div class="results-dashboard">
+        <div class="results-tabs">
+          <button class="tab-btn active" data-tab="tab-ledger">📦 Operational Freight Ledger</button>
+          <button class="tab-btn" data-tab="tab-cost">💰 Itemized Financial Breakdown</button>
+          <button class="tab-btn" data-tab="tab-routing">🗺️ Route Kinematics & Delays</button>
+          <button class="tab-btn" data-tab="tab-population">🏘️ Population & Impact Zones</button>
+          <button class="tab-btn" data-tab="tab-gdacs">🚨 GDACS Live Emergencies</button>
+        </div>
+
+        <div class="tab-content" id="tab-ledger">
+          <div class="table-container">
+            <table class="data-table" id="table-ledger">
+              <thead>
+                <tr>
+                  <th>Mode</th>
+                  <th>Origin Depot</th>
+                  <th>Destination Zone</th>
+                  <th>Allocated Cargo</th>
+                  <th>Sorties</th>
+                  <th>1-Way Dist</th>
+                  <th>Total Route</th>
+                  <th>Hazard Dist</th>
+                  <th>Est. Duration</th>
+                  <th>Route Expense</th>
+                </tr>
+              </thead>
+              <tbody id="table-ledger-body">
+                <tr>
+                  <td colspan="10" class="empty-state">No simulation run yet. Click "Run Optimization" above to calculate routes.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="tab-content" id="tab-cost" style="display: none;">
+          <div class="cost-breakdown-grid">
+            <div class="cost-item">
+              <div class="cost-header">
+                <span class="cost-name">⛽ Real-Time Diesel Fuel (Trucks)</span>
+                <span class="cost-val" id="cost-val-diesel">$0.00</span>
+              </div>
+              <div class="progress-bar"><div class="progress-fill fill-diesel" id="bar-diesel" style="width: 0%"></div></div>
+            </div>
+
+            <div class="cost-item">
+              <div class="cost-header">
+                <span class="cost-name">🔋 DJI Flight Battery Depletion (Drones)</span>
+                <span class="cost-val" id="cost-val-battery">$0.00</span>
+              </div>
+              <div class="progress-bar"><div class="progress-fill fill-battery" id="bar-battery" style="width: 0%"></div></div>
+            </div>
+
+            <div class="cost-item">
+              <div class="cost-header">
+                <span class="cost-name">🛠️ Clear Road Vehicle Wear (Trucks)</span>
+                <span class="cost-val" id="cost-val-truck-wear">$0.00</span>
+              </div>
+              <div class="progress-bar"><div class="progress-fill fill-wear" id="bar-truck-wear" style="width: 0%"></div></div>
+            </div>
+
+            <div class="cost-item">
+              <div class="cost-header">
+                <span class="cost-name">🛸 Motor Aerodynamic Stress Wear (Drones)</span>
+                <span class="cost-val" id="cost-val-drone-wear">$0.00</span>
+              </div>
+              <div class="progress-bar"><div class="progress-fill fill-drone-wear" id="bar-drone-wear" style="width: 0%"></div></div>
+            </div>
+
+            <div class="cost-item">
+              <div class="cost-header">
+                <span class="cost-name">🌧️ Severe Hazard Perimeter Wreckage Wear</span>
+                <span class="cost-val" id="cost-val-hazard-wear">$0.00</span>
+              </div>
+              <div class="progress-bar"><div class="progress-fill fill-hazard" id="bar-hazard-wear" style="width: 0%"></div></div>
+            </div>
+
+            <div class="cost-item">
+              <div class="cost-header">
+                <span class="cost-name">⚠️ Unmet Supply Shortage Disaster Penalty</span>
+                <span class="cost-val" id="cost-val-shortage">$0.00</span>
+              </div>
+              <div class="progress-bar"><div class="progress-fill fill-shortage" id="bar-shortage" style="width: 0%"></div></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="tab-content" id="tab-routing" style="display: none;">
+          <div class="routing-summary-panel" id="routing-summary-panel">
+            <p class="empty-state">Execute simulation to view physics and graph friction analysis.</p>
+          </div>
+        </div>
+
+        <div class="tab-content" id="tab-population" style="display: none;">
+          <div class="population-results-panel" id="population-results-panel">
+            <p class="empty-state">Click "Analyze Population" to query OSM building footprints and detect high-density impact zones.</p>
+          </div>
+        </div>
+
+        <div class="tab-content" id="tab-gdacs" style="display: none;">
+          <div class="gdacs-results-panel" id="gdacs-results-panel">
+            <p class="empty-state">Click "Query GDACS Live Alerts" in the sidebar to fetch real-time UN/EC disaster events around the hazard perimeter.</p>
+          </div>
+        </div>
+
+      </div>
+
+    </section>
+  </main>
+
+  <!-- Leaflet JS -->
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+  <!-- Application JS -->
+  <script src="app.js"></script>
+</body>
+</html>

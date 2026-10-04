@@ -1,0 +1,13 @@
+numpy>=2.0.0
+scipy>=1.15.0
+networkx>=3.4.0
+osmnx>=2.0.0
+geopandas>=1.0.0
+shapely>=2.0.0
+pyproj>=3.7.0
+geopy>=2.4.0
+pulp>=2.8.0,<3.0.0
+highspy>=1.15.0
+flask>=3.0.0
+flask-cors>=5.0.0
+requests>=2.30.0
