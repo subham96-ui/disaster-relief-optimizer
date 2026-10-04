@@ -67,7 +67,7 @@ Get a shareable public URL in under 2 minutes:
    - **Start Command:** `python app.py`
 5. Click **Deploy** ✅
 
-Your site will be live at: `https://disaster-relief-optimizer.onrender.com`
+Your site will be live at: `https://disaster-relief-optimizer-2im2.onrender.com/`
 
 ---
 
